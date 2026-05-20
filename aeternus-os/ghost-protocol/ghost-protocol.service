@@ -2,8 +2,8 @@
 Description=V0RTEX Ghost Protocol — VPN+Tor Kill Switch
 Documentation=man:iptables(8) man:tor(1)
 After=network-online.target tor.service openvpn.service
+# Wants (não Requires): ghost-protocol não falha se tor não subir imediatamente
 Wants=network-online.target tor.service
-Requires=tor.service
 
 [Service]
 Type=oneshot
@@ -29,9 +29,8 @@ RestrictRealtime=yes
 RestrictNamespaces=yes
 LockPersonality=yes
 
-# Restart em falha
-Restart=on-failure
-RestartSec=5s
+# Oneshot não suporta Restart=on-failure com RemainAfterExit=yes de forma útil
+# Restart removido para evitar loop de falhas no journal
 
 [Install]
 WantedBy=multi-user.target
