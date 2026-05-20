@@ -573,14 +573,8 @@ CUSTSH
 
     ok "Senha root definida: v0rtex"
 
-    # Autologin root no tty1 (live ISO — sem prompt de senha)
-    mkdir -p "$air/etc/systemd/system/getty@tty1.service.d"
-    cat > "$air/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<'AUTOLOGIN'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
-AUTOLOGIN
-    ok "Autologin root em tty1 configurado"
+    # (Autologin root removido para maior segurança e estabilidade do Xorg)
+
 
     # REMOVIDO: echo "chsh -s /bin/zsh root" >> profile.d/aeternus.sh
     # Motivo: profile.d roda em CADA login, causando "chsh: Shell not changed"

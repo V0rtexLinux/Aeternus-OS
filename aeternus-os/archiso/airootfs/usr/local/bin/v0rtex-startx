@@ -28,5 +28,5 @@ for _ in $(seq 1 30); do
 done
 
 echo "[v0rtex] Iniciando Xorg... (log: /tmp/xorg.log)"
-exec startx "$HOME/.xinitrc" -- :0 vt1 -keeptty \
+exec startx "$HOME/.xinitrc" -- :0 \
     -logfile /tmp/xorg.log -logverbose 3

@@ -47,6 +47,7 @@ qemu-system-x86_64 \
     -smp 2 \
     -cdrom "$ISO_FILE" \
     -boot d \
+    -smbios type=11,value=v0rtex-mobile \
     -vga virtio \
     -display vnc=127.0.0.1:0 \
     -netdev user,id=net0 \
