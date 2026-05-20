@@ -246,6 +246,7 @@ file_permissions=(
     ["/root/.bash_profile"]="0:0:644"
     ["/root/.zprofile"]="0:0:644"
     ["/usr/local/bin/v0rtex-startx"]="0:0:755"
+    ["/usr/local/bin/v0rtex-autoresize.sh"]="0:0:755"
 )
 PROFILEDEF
     else

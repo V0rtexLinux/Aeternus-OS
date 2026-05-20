@@ -24,6 +24,12 @@ exec >> "$XLOG" 2>&1
 
 echo "[xinitrc] $(date) — sessão X iniciada (DISPLAY=$DISPLAY)"
 
+# ── Auto Resize & DPI ─────────────────────────────────────────────────────────
+if command -v v0rtex-autoresize.sh >/dev/null 2>&1; then
+    echo "[xinitrc] detectando tamanho da tela e dispositivo..."
+    v0rtex-autoresize.sh
+fi
+
 # ── Cursor ────────────────────────────────────────────────────────────────────
 xsetroot -cursor_name left_ptr 2>/dev/null || true
 xsetroot -solid "#000000"     2>/dev/null || true
