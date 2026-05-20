@@ -83,3 +83,18 @@ jobs:
             aeternus-os/release/*.sha256
           if-no-files-found: error
           retention-days: 14
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Alterações automáticas desta versão.
+            Adicione notas ou logs aqui.
+          draft: false
+          prerelease: false
+          files: |
+            aeternus-os/release/*.iso
