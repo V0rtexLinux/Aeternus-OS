@@ -8,7 +8,8 @@ set -euo pipefail
 SCRIPT_NAME="ghost-protocol"
 LOG_TAG="ghost-protocol"
 TUN_IFACE="${TUN_IFACE:-tun0}"          # Interface VPN (OpenVPN/WireGuard)
-TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null || echo "")
+# Não usa die() aqui: TOR_UID vazio é tratado de forma resiliente em apply_tor_routing()
+TOR_UID=$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null || true)
 TOR_TRANS_PORT=9040
 TOR_DNS_PORT=5353
 LOCAL_NETS="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.0/8"
@@ -87,7 +88,15 @@ apply_vpn_killswitch() {
 # Encadear Tor sobre VPN (Tor-over-VPN)
 # ────────────────────────────────────────────────
 apply_tor_routing() {
-    [[ -z "$TOR_UID" ]] && die "Usuário tor não encontrado. Instale o pacote tor."
+    # Verificação resiliente: Tor ausente = aviso + skip, NÃO falha fatal.
+    # set -euo pipefail está ativo; qualquer die() aqui derrubaria o serviço
+    # com o kill switch já ativo (política DROP), bloqueando toda a rede.
+    if [[ -z "${TOR_UID:-}" ]]; then
+        log "AVISO: usuário 'tor'/'debian-tor' não encontrado."
+        log "AVISO: roteamento transparente Tor DESATIVADO (sem pacote tor instalado)."
+        log "AVISO: tráfego vai fluir apenas pela VPN (kill switch VPN ativo)."
+        return 0  # Falha soft — não aborta o serviço
+    fi
 
     log "Configurando roteamento transparente Tor (UID=$TOR_UID)..."
 
@@ -112,13 +121,20 @@ apply_tor_routing() {
     # Bloquear UDP (Tor não usa UDP — prevenção de vazamento)
     iptables -A OUTPUT -p udp -j DROP
 
-    # DNS interno do sistema: encaminhar para Tor
-    if systemctl is-active --quiet tor; then
+    # Verifica/inicia Tor sem propagar falha (|| true protege o set -e)
+    if systemctl is-active --quiet tor 2>/dev/null; then
         log "Tor ativo — roteamento transparente aplicado."
     else
-        log "Iniciando serviço Tor..."
-        systemctl start tor.service
+        log "Tor inativo — tentando iniciar tor.service (não-fatal)..."
+        systemctl start tor.service 2>/dev/null || true
         sleep 3
+        if systemctl is-active --quiet tor 2>/dev/null; then
+            log "Tor iniciado com sucesso."
+        else
+            log "AVISO: tor.service não subiu. Regras de roteamento aplicadas,"
+            log "AVISO: mas tráfego TCP será redirecionado a uma porta sem listener."
+            log "AVISO: Isso é seguro (zero-leak): conexões TCP falharão até o Tor subir."
+        fi
     fi
 
     log "Tor-over-VPN configurado."

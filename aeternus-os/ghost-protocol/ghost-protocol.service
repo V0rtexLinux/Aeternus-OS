@@ -1,9 +1,18 @@
 [Unit]
 Description=V0RTEX Ghost Protocol — VPN+Tor Kill Switch
 Documentation=man:iptables(8) man:tor(1)
-After=network-online.target tor.service openvpn.service
-# Wants (não Requires): ghost-protocol não falha se tor não subir imediatamente
-Wants=network-online.target tor.service
+
+# Ordenação (não dependência): garante que, se tor/openvpn estiverem ativos,
+# este serviço sobe DEPOIS — mas não falha se eles não subirem.
+After=network-online.target
+After=tor.service
+After=openvpn.service
+
+# Wants = dependência soft: solicita a subida dos serviços, mas NÃO bloqueia
+# este serviço caso eles falhem. NUNCA use Requires= aqui — causaria falha
+# em cascata com o kill switch ativo (rede bloqueada e serviço morto).
+Wants=network-online.target
+Wants=tor.service
 
 [Service]
 Type=oneshot
