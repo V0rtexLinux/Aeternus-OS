@@ -1,0 +1,28 @@
+# V0rtexOS — Raspberry Pi 4/5 config.txt
+# Colocado em /boot na partição FAT32 do microSD/USB
+
+# ── GPU / Display ──────────────────────────────────────────
+# Usa vc4-fkms-v3d (RPi 4) ou vc4-kms-v3d (RPi 5)
+# Habilita suporte KMS para Xorg usar driver modesetting
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+gpu_mem=128
+
+# ── Boot ──────────────────────────────────────────────────
+arm_64bit=1
+kernel=vmlinuz-linux
+initramfs initramfs-linux.img followkernel
+
+# ── HDMI ──────────────────────────────────────────────────
+# Força saída HDMI mesmo sem monitor conectado
+hdmi_force_hotplug=1
+hdmi_drive=2
+
+# ── Overclocking moderado (seguro com dissipador) ─────────
+# Descomentare se necessário
+# arm_freq=1800
+# over_voltage=2
+
+# ── DSI / Touchscreen ─────────────────────────────────────
+# Descomentare para tela oficial RPi Touch Display
+# dtoverlay=rpi-ft5406

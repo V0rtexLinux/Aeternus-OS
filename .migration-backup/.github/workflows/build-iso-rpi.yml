@@ -1,0 +1,104 @@
+name: Build V0rtexOS Raspberry Pi ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'aeternus-os/**'
+      - '.github/workflows/build-iso-rpi.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-iso-rpi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-rpi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Raspberry Pi ISO (Arch Linux ARM container)
+        run: |
+          docker run --privileged --rm \
+            --platform linux/arm64 \
+            -v "${{ github.workspace }}:/workspace" \
+            -v /mnt:/mnt \
+            -w /workspace/aeternus-os \
+            -e CI=true \
+            -e GITHUB_ACTIONS=true \
+            -e TARGET=rpi \
+            archlinuxarm/base:latest \
+            bash -euxo pipefail -c '
+              echo "Server = https://mirror.archlinuxarm.org/\$arch/\$repo" > /etc/pacman.d/mirrorlist
+
+              pacman -Syu --noconfirm --needed \
+                archiso git curl base-devel gcc make cmake \
+                cairo libxrender libx11 pkg-config \
+                squashfs-tools libisoburn dosfstools mtools \
+                grub efibootmgr python openssl haveged uboot-tools \
+                raspberrypi-firmware
+
+              haveged -w 1024 &
+              pacman-key --init
+              pacman-key --populate archlinuxarm
+
+              bash build.sh --target=rpi
+            '
+
+      - name: List release artifacts
+        run: ls -lah aeternus-os/release/ 2>/dev/null || true
+
+      - name: Upload RPi ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v0rtexos-rpi-iso-${{ github.run_number }}
+          path: |
+            aeternus-os/release/*rpi*.iso
+            aeternus-os/release/*rpi*.sha256
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        run: |
+          ISO=$(find aeternus-os/release/ -name "*rpi*.iso" 2>/dev/null | head -1)
+          if [[ -n "$ISO" ]]; then
+            SIZE=$(du -sh "$ISO" | cut -f1)
+            echo "## V0rtexOS RPi Build" >> $GITHUB_STEP_SUMMARY
+            echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+            echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+            echo "| ISO | \`$(basename "$ISO")\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Tamanho | $SIZE |" >> $GITHUB_STEP_SUMMARY
+            echo "| Run | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Gravar no microSD:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "sudo dd if=$(basename "$ISO") of=/dev/sdX bs=4M status=progress" >> $GITHUB_STEP_SUMMARY
+            echo "sync" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Build RPi FALHOU" >> $GITHUB_STEP_SUMMARY
+          fi

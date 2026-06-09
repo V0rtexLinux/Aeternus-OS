@@ -1,14 +1,15 @@
+# aeternus-taskbar.service — DESABILITADO COMO SERVIÇO SYSTEMD
+# O panel e taskbar são iniciados exclusivamente pelo .xinitrc
+# Isso evita que tentem conectar ao DISPLAY antes do Xorg estar ativo,
+# o que causava múltiplos shells e falhas de inicialização.
+#
+# Este arquivo existe apenas como referência.
+# NÃO habilitar com: systemctl enable aeternus-taskbar
+#
+# Para iniciar manualmente após X estar ativo:
+#   DISPLAY=:0 aeternus-taskbar &
+
 [Unit]
-Description=V0rtexOS Desktop Taskbar (X11/Cairo)
-After=graphical.target
-
-[Service]
-Type=simple
-Environment=DISPLAY=:0
-ExecStartPre=/bin/sleep 2
-ExecStart=/usr/local/bin/aeternus-taskbar
-Restart=on-failure
-RestartSec=3s
-
-[Install]
-WantedBy=graphical.target
+Description=V0rtexOS Desktop Taskbar (NÃO habilitar — iniciado via .xinitrc)
+Documentation=file:///usr/local/src/aeternus-gui/panel/aeternus-taskbar.c
+# Nenhum [Install] section = não pode ser habilitado acidentalmente

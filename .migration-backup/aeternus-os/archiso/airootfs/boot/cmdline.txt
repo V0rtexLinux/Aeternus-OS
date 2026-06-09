@@ -1,0 +1,1 @@
+root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw quiet loglevel=0 rd.udev.log_level=3 console=tty0 console=ttyAMA0,115200 apparmor=1 security=apparmor mitigations=auto,nosmt

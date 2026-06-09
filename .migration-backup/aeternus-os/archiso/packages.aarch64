@@ -1,0 +1,242 @@
+# V0rtexOS — Pacotes para ARM64 (aarch64)
+# Targets: Raspberry Pi 4/5, ARM64 bare metal, Android/Termux (chroot), celulares
+
+# ══════════════════════════════════════════════════════════
+# KERNEL ARM64
+# ══════════════════════════════════════════════════════════
+linux-aarch64
+linux-firmware
+linux-firmware-whence
+mkinitcpio
+mkinitcpio-archiso
+squashfs-tools
+
+# ══════════════════════════════════════════════════════════
+# BASE
+# ══════════════════════════════════════════════════════════
+base
+base-devel
+archlinux-keyring
+bash
+bash-completion
+bzip2
+coreutils
+diffutils
+file
+findutils
+gawk
+gcc-libs
+gettext
+glibc
+grep
+gzip
+iproute2
+iputils
+kbd
+keyutils
+less
+licenses
+pciutils
+procps-ng
+psmisc
+sed
+shadow
+systemd
+systemd-sysvcompat
+tar
+texinfo
+usbutils
+util-linux
+which
+xz
+
+# ══════════════════════════════════════════════════════════
+# BOOT ARM64
+# ══════════════════════════════════════════════════════════
+grub
+efibootmgr
+uboot-tools
+dosfstools
+
+# ══════════════════════════════════════════════════════════
+# CRIPTOGRAFIA / DISCO
+# ══════════════════════════════════════════════════════════
+cryptsetup
+lvm2
+device-mapper
+dosfstools
+e2fsprogs
+exfatprogs
+btrfs-progs
+f2fs-tools
+ntfs-3g
+parted
+gptfdisk
+
+# ══════════════════════════════════════════════════════════
+# REDE
+# ══════════════════════════════════════════════════════════
+networkmanager
+network-manager-applet
+openvpn
+networkmanager-openvpn
+wireguard-tools
+openresolv
+nftables
+iptables-nft
+ipset
+net-tools
+openssh
+openssl
+libpcap
+openbsd-netcat
+socat
+tcpdump
+iw
+wireless_tools
+wpa_supplicant
+macchanger
+nmap
+curl
+wget
+
+# ══════════════════════════════════════════════════════════
+# ANONIMATO / TOR
+# ══════════════════════════════════════════════════════════
+tor
+torsocks
+proxychains-ng
+dnscrypt-proxy
+
+# ══════════════════════════════════════════════════════════
+# SHELL / TERMINAL
+# ══════════════════════════════════════════════════════════
+zsh
+zsh-completions
+zsh-syntax-highlighting
+zsh-autosuggestions
+alacritty
+tmux
+neovim
+vim
+nano
+ranger
+bat
+eza
+fd
+ripgrep
+fzf
+starship
+jq
+
+# ══════════════════════════════════════════════════════════
+# X.ORG / DISPLAY — ARM64
+# ══════════════════════════════════════════════════════════
+xorg-server
+xorg-xinit
+xorg-xrandr
+xorg-xdpyinfo
+xorg-xev
+xorg-setxkbmap
+xorg-xset
+xorg-xprop
+xorg-xkill
+xorg-xhost
+xorg-xauth
+xorg-xsetroot
+xdotool
+xclip
+xdg-utils
+picom
+feh
+scrot
+
+# ── Drivers ARM64 ─────────────────────────────────────────
+xf86-video-fbdev
+# modesetting incluso no xorg-server
+
+# ── Mesa ARM64 (panfrost / lima / vc4 / v3d) ─────────────
+mesa
+libgl
+
+# ── Input ─────────────────────────────────────────────────
+libinput
+xf86-input-libinput
+xf86-input-evdev
+
+# ══════════════════════════════════════════════════════════
+# GUI LIBS — C/Xlib/Cairo
+# ══════════════════════════════════════════════════════════
+cairo
+libxrender
+libx11
+
+# ══════════════════════════════════════════════════════════
+# WINDOW MANAGER
+# ══════════════════════════════════════════════════════════
+i3-wm
+i3status
+i3lock
+dmenu
+rofi
+dunst
+lxappearance
+
+# ══════════════════════════════════════════════════════════
+# FONTES
+# ══════════════════════════════════════════════════════════
+ttf-liberation
+ttf-roboto
+noto-fonts
+noto-fonts-emoji
+
+# ══════════════════════════════════════════════════════════
+# APPS ESSENCIAIS
+# ══════════════════════════════════════════════════════════
+firefox
+nm-connection-editor
+pavucontrol
+mpv
+ffmpeg
+imagemagick
+
+# ══════════════════════════════════════════════════════════
+# SEGURANÇA BASE
+# ══════════════════════════════════════════════════════════
+apparmor
+firejail
+libseccomp
+ufw
+audit
+
+# ══════════════════════════════════════════════════════════
+# DESENVOLVIMENTO
+# ══════════════════════════════════════════════════════════
+python
+python-pip
+python-requests
+python-scapy
+python-cryptography
+python-paramiko
+python-psutil
+gcc
+make
+cmake
+git
+git-lfs
+
+# ══════════════════════════════════════════════════════════
+# UTILITÁRIOS
+# ══════════════════════════════════════════════════════════
+htop
+btop
+ncdu
+tree
+rsync
+p7zip
+unzip
+zip
+zstd
+bc
+lsof
+fastfetch

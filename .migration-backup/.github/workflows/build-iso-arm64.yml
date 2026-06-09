@@ -1,0 +1,85 @@
+name: Build V0rtexOS ARM64 ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'aeternus-os/**'
+      - '.github/workflows/build-iso-arm64.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-iso-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Show disk space
+        run: df -h / /mnt
+
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build ARM64 ISO (Arch Linux ARM container)
+        run: |
+          docker run --privileged --rm \
+            --platform linux/arm64 \
+            -v "${{ github.workspace }}:/workspace" \
+            -v /mnt:/mnt \
+            -w /workspace/aeternus-os \
+            -e CI=true \
+            -e GITHUB_ACTIONS=true \
+            -e TARGET=arm64 \
+            archlinuxarm/base:latest \
+            bash -euxo pipefail -c '
+              # Arch Linux ARM usa pacman com mirror ARM
+              echo "Server = https://mirror.archlinuxarm.org/\$arch/\$repo" > /etc/pacman.d/mirrorlist
+
+              pacman -Syu --noconfirm --needed \
+                archiso git curl base-devel gcc make cmake \
+                cairo libxrender libx11 pkg-config \
+                squashfs-tools libisoburn dosfstools mtools \
+                grub efibootmgr python openssl haveged uboot-tools
+
+              haveged -w 1024 &
+              pacman-key --init
+              pacman-key --populate archlinuxarm
+
+              bash build.sh --target=arm64
+            '
+
+      - name: List release artifacts
+        run: ls -lah aeternus-os/release/ 2>/dev/null || true
+
+      - name: Upload ARM64 ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v0rtexos-arm64-iso-${{ github.run_number }}
+          path: |
+            aeternus-os/release/*arm64*.iso
+            aeternus-os/release/*arm64*.sha256
+          if-no-files-found: warn
+          retention-days: 14

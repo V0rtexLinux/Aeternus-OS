@@ -4,9 +4,23 @@ on:
   push:
     branches: ["main"]
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Build target'
+        required: false
+        default: 'x86_64'
+        type: choice
+        options:
+          - x86_64
+          - arm64
+          - rpi
+          - mobile
+          - all
 
 jobs:
-  build:
+  # ── x86_64 ──────────────────────────────────────────────────────
+  build-x86_64:
+    if: ${{ github.event_name == 'push' || inputs.target == 'x86_64' || inputs.target == 'all' || inputs.target == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -20,64 +34,39 @@ jobs:
         run: |
           echo "[*] Disco antes da limpeza:"
           df -h
-
-          # Remover ferramentas pré-instaladas que não precisamos
           sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /opt/hostedtoolcache/CodeQL \
-            /usr/local/share/boost \
-            /usr/share/swift \
-            /usr/local/.ghcup \
-            /usr/lib/jvm \
-            /usr/share/java \
-            /opt/microsoft \
-            /usr/local/graalvm \
-            /usr/share/miniconda \
-            /usr/local/share/chromium \
-            /usr/local/share/powershell \
-            /usr/share/az_9.3.0 \
-            /usr/local/lib/node_modules \
-            /usr/lib/firefox \
-            /usr/share/mysql \
-            /usr/share/php* \
-            /opt/pipx \
-            /usr/local/bin/phpunit \
+            /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            /usr/share/swift /usr/local/.ghcup /usr/lib/jvm \
+            /usr/share/java /opt/microsoft /usr/local/graalvm \
+            /usr/share/miniconda /usr/local/share/chromium \
+            /usr/local/share/powershell /usr/local/lib/node_modules \
+            /usr/lib/firefox /usr/share/mysql /usr/share/php* \
             || true
-
           sudo apt-get clean -y
           sudo apt-get autoremove -y
-
-          # Limpar imagens Docker pré-carregadas
           docker system prune -af --volumes || true
-
           echo "[+] Disco após limpeza:"
           df -h
 
       - name: Pull Arch Linux image
         run: docker pull archlinux:latest
 
-      - name: Build AETERNUS OS ISO (Arch container)
+      - name: Build V0rtexOS ISO x86_64 (Arch container)
         run: |
           docker run \
-            --privileged \
-            --cap-add=ALL \
-            --rm \
+            --privileged --cap-add=ALL --rm \
             -v "${{ github.workspace }}:/build" \
-            -e CI=true \
-            -e TERM=xterm \
+            -e CI=true -e TERM=xterm \
             archlinux:latest \
             bash -c "
               set -euo pipefail
-              echo '[*] Espaço disponível no início:'
+              echo '[*] Espaço disponível:'
               df -h
 
-              # Instalar dependências base
               pacman -Sy --noconfirm --needed archlinux-keyring haveged
               haveged -w 1024 &
               sleep 3
-
               pacman -Su --noconfirm
               pacman-key --init
               pacman-key --populate archlinux
@@ -85,46 +74,41 @@ jobs:
               pacman -S --noconfirm --needed \
                 archiso git curl wget python3 unzip openssl \
                 dosfstools mtools libisoburn squashfs-tools \
-                erofs-utils e2fsprogs libarchive xorriso grub efibootmgr
+                erofs-utils e2fsprogs libarchive xorriso \
+                grub efibootmgr \
+                gcc make cairo libxrender libx11 pkg-config
 
-              # Adicionar BlackArch
               curl -fsSL https://blackarch.org/strap.sh -o /tmp/blackarch-strap.sh
               chmod +x /tmp/blackarch-strap.sh
               bash /tmp/blackarch-strap.sh
               rm -f /tmp/blackarch-strap.sh
               pacman -Sy --noconfirm
 
-              echo '[*] Espaço antes do build:'
-              df -h
-
               cd /build/aeternus-os
               chmod +x build.sh
-              CI=true bash build.sh 2>&1
-
-              echo '[*] Espaço após build:'
-              df -h
+              CI=true bash build.sh --target=x86_64 2>&1
             "
 
       - name: Generate checksums
         if: success()
         run: |
-          cd aeternus-os/release
-          sha256sum *.iso > checksum.sha256
-          md5sum    *.iso > checksum.md5
-          ls -lh *.iso && cat checksum.sha256
+          cd aeternus-os/release 2>/dev/null || cd /mnt/v0rtex-release 2>/dev/null || true
+          sha256sum *.iso > checksum.sha256 2>/dev/null || true
+          md5sum    *.iso > checksum.md5    2>/dev/null || true
+          ls -lh *.iso 2>/dev/null || true
 
       - name: Show build log on failure
         if: failure()
         run: |
-          cat /tmp/aeternus-build.log 2>/dev/null || \
+          cat /tmp/v0rtex-build.log 2>/dev/null || \
           docker run --rm -v "${{ github.workspace }}:/build" archlinux:latest \
-            cat /tmp/aeternus-build.log 2>/dev/null || echo "(log não encontrado)"
+            cat /tmp/v0rtex-build.log 2>/dev/null || echo "(log não encontrado)"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AETERNUS-OS-${{ github.run_number }}-${{ github.sha }}
+          name: AETERNUS-OS-x86_64-${{ github.run_number }}-${{ github.sha }}
           path: |
             aeternus-os/release/*.iso
             aeternus-os/release/checksum.sha256
@@ -139,13 +123,185 @@ jobs:
           if [[ -n "$ISO" ]]; then
             SIZE=$(du -sh "$ISO" | cut -f1)
             SHA=$(sha256sum "$ISO" | awk '{print $1}')
-            echo "## AETERNUS OS Build Concluído" >> $GITHUB_STEP_SUMMARY
+            echo "## AETERNUS OS x86_64 Build Concluído" >> $GITHUB_STEP_SUMMARY
             echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
             echo "|---|---|" >> $GITHUB_STEP_SUMMARY
             echo "| ISO | \`$(basename "$ISO")\` |" >> $GITHUB_STEP_SUMMARY
             echo "| Tamanho | $SIZE |" >> $GITHUB_STEP_SUMMARY
             echo "| SHA256 | \`$SHA\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Run | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "## Build FALHOU — nenhuma ISO gerada" >> $GITHUB_STEP_SUMMARY
+            echo "## Build x86_64 FALHOU — nenhuma ISO gerada" >> $GITHUB_STEP_SUMMARY
           fi
+
+  # ── ARM64 ───────────────────────────────────────────────────────
+  build-arm64:
+    if: ${{ inputs.target == 'arm64' || inputs.target == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TERM: xterm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/lib/jvm || true
+          sudo apt-get clean -y
+          docker system prune -af --volumes || true
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build V0rtexOS ARM64 ISO
+        run: |
+          docker run \
+            --privileged --cap-add=ALL --rm \
+            --platform linux/arm64 \
+            -v "${{ github.workspace }}:/build" \
+            -e CI=true -e TERM=xterm -e TARGET=arm64 \
+            archlinuxarm/base:latest \
+            bash -c "
+              set -euo pipefail
+              echo 'Server = https://mirror.archlinuxarm.org/\$arch/\$repo' > /etc/pacman.d/mirrorlist
+              pacman -Syu --noconfirm --needed archiso haveged git curl \
+                gcc make cairo libxrender libx11 pkg-config \
+                squashfs-tools libisoburn dosfstools mtools grub efibootmgr uboot-tools
+              haveged -w 1024 &
+              pacman-key --init
+              pacman-key --populate archlinuxarm
+              cd /build/aeternus-os
+              chmod +x build.sh
+              CI=true bash build.sh --target=arm64 2>&1
+            "
+
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AETERNUS-OS-arm64-${{ github.run_number }}
+          path: aeternus-os/release/*arm64*
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ── Raspberry Pi ────────────────────────────────────────────────
+  build-rpi:
+    if: ${{ inputs.target == 'rpi' || inputs.target == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TERM: xterm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/lib/jvm || true
+          sudo apt-get clean -y
+          docker system prune -af --volumes || true
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build V0rtexOS RPi ISO
+        run: |
+          docker run \
+            --privileged --cap-add=ALL --rm \
+            --platform linux/arm64 \
+            -v "${{ github.workspace }}:/build" \
+            -e CI=true -e TERM=xterm -e TARGET=rpi \
+            archlinuxarm/base:latest \
+            bash -c "
+              set -euo pipefail
+              echo 'Server = https://mirror.archlinuxarm.org/\$arch/\$repo' > /etc/pacman.d/mirrorlist
+              pacman -Syu --noconfirm --needed archiso haveged git curl \
+                gcc make cairo libxrender libx11 pkg-config \
+                squashfs-tools libisoburn dosfstools mtools grub efibootmgr \
+                uboot-tools raspberrypi-firmware 2>/dev/null || true
+              haveged -w 1024 &
+              pacman-key --init
+              pacman-key --populate archlinuxarm
+              cd /build/aeternus-os
+              chmod +x build.sh
+              CI=true bash build.sh --target=rpi 2>&1
+            "
+
+      - name: Upload RPi artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AETERNUS-OS-rpi-${{ github.run_number }}
+          path: aeternus-os/release/*rpi*
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: RPi Flash instructions
+        if: success()
+        run: |
+          echo "## V0rtexOS Raspberry Pi" >> $GITHUB_STEP_SUMMARY
+          echo "**Gravar no microSD:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "sudo dd if=v0rtex-os-rpi-*.iso of=/dev/mmcblkX bs=4M status=progress" >> $GITHUB_STEP_SUMMARY
+          echo "sync" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── Mobile (ARM64 minimal) ──────────────────────────────────────
+  build-mobile:
+    if: ${{ inputs.target == 'mobile' || inputs.target == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TERM: xterm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/lib/jvm || true
+          sudo apt-get clean -y
+          docker system prune -af --volumes || true
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build V0rtexOS Mobile rootfs
+        run: |
+          docker run \
+            --privileged --cap-add=ALL --rm \
+            --platform linux/arm64 \
+            -v "${{ github.workspace }}:/build" \
+            -e CI=true -e TERM=xterm -e TARGET=mobile \
+            archlinuxarm/base:latest \
+            bash -c "
+              set -euo pipefail
+              echo 'Server = https://mirror.archlinuxarm.org/\$arch/\$repo' > /etc/pacman.d/mirrorlist
+              pacman -Syu --noconfirm --needed archiso haveged git curl \
+                gcc make cairo libxrender libx11 pkg-config \
+                squashfs-tools libisoburn dosfstools mtools grub efibootmgr
+              haveged -w 1024 &
+              pacman-key --init
+              pacman-key --populate archlinuxarm
+              cd /build/aeternus-os
+              chmod +x build.sh
+              CI=true bash build.sh --target=mobile 2>&1
+            "
+
+      - name: Upload Mobile artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AETERNUS-OS-mobile-${{ github.run_number }}
+          path: aeternus-os/release/*mobile*
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
 # V0rtexOS — Master Build Script
-# Gera a ISO completa baseada em Arch Linux com linux-hardened + BlackArch
-# Uso: sudo bash build.sh [--fast|--full]
+# Suporta: x86_64 (padrão), arm64/aarch64, rpi (Raspberry Pi), mobile (ARM64 minimal)
+# Uso: sudo bash build.sh [--fast|--full] [--target=x86_64|arm64|rpi|mobile]
 #
-# Requer: archiso mkarchiso pacman git curl (em host Arch Linux)
+# Requer: archiso mkarchiso pacman git curl (em host Arch Linux / Arch Linux ARM)
 
-set -euo pipefail
+set -uo pipefail
 
 VORTEX_VERSION="2.0.$(date +%Y%m%d)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROFILE_DIR="$SCRIPT_DIR/v0rtex-profile"
 LOG_FILE="/tmp/v0rtex-build.log"
-FAST_MODE="${1:-}"
+
+# ── Parsear argumentos ────────────────────────────────────────────────────────
+TARGET="x86_64"
+FAST_MODE=""
+for _arg in "$@"; do
+    case "$_arg" in
+        --target=*) TARGET="${_arg#--target=}" ;;
+        --fast)     FAST_MODE="--fast" ;;
+        --full)     FAST_MODE="" ;;
+    esac
+done
+# Normalizar: arm64 == aarch64
+[[ "$TARGET" == "arm64" ]] && TARGET="aarch64"
+
+# Validar target
+case "$TARGET" in
+    x86_64|aarch64|rpi|mobile) ;;
+    *) echo "ERRO: --target deve ser x86_64, arm64, rpi ou mobile"; exit 1 ;;
+esac
+
+PROFILE_DIR="$SCRIPT_DIR/v0rtex-profile-${TARGET}"
 
 # Detectar CI (GitHub Actions, GitLab CI, etc.)
 CI="${CI:-false}"
@@ -21,10 +40,10 @@ CI="${CI:-false}"
 # Em CI usa /mnt (disco de dados ~28 GB no GitHub Actions, vs ~14 GB em /)
 # Localmente usa /tmp para builds normais
 if [[ "$CI" == "true" ]]; then
-    WORK_DIR="/mnt/v0rtex-build-work"
+    WORK_DIR="/mnt/v0rtex-build-work-${TARGET}"
     OUT_DIR="/mnt/v0rtex-release"
 else
-    WORK_DIR="/tmp/v0rtex-build-work"
+    WORK_DIR="/tmp/v0rtex-build-work-${TARGET}"
     OUT_DIR="$SCRIPT_DIR/release"
 fi
 
@@ -119,9 +138,9 @@ free_ci_disk() {
 # ════════════════════════════════════════════════
 preflight() {
     [[ $EUID -ne 0 ]] && err "Execute como root: sudo bash build.sh"
-    [[ "$(uname -s)" != "Linux" ]] && err "Requer Linux (Arch Linux preferido)"
+    [[ "$(uname -s)" != "Linux" ]] && err "Requer Linux"
 
-    sec "PRE-FLIGHT CHECKS"
+    sec "PRE-FLIGHT CHECKS (target=$TARGET)"
     local deps=(archiso mkarchiso pacman git curl unzip python3 openssl grub)
     local missing=()
     for d in "${deps[@]}"; do
@@ -133,15 +152,18 @@ preflight() {
             err "Falha ao instalar: ${missing[*]}"
     }
 
-    # Verificar espaço em disco
-    # Em CI o /tmp pode ter menos que 20GB — apenas avisa, não bloqueia
+    # Para targets ARM64, verificar cross-build
+    if [[ "$TARGET" != "x86_64" ]] && [[ "$(uname -m)" != "aarch64" ]]; then
+        warn "Cross-compilando para ARM64 em $(uname -m) — requer qemu-user-static"
+    fi
+
     local free_gb
     free_gb=$(df /tmp --output=avail -BG 2>/dev/null | tail -1 | tr -d 'G ' || echo "0")
     local threshold=20
     [[ "$CI" == "true" ]] && threshold=8
     if [[ "$free_gb" -lt "$threshold" ]]; then
         warn "Espaço livre em /tmp: ${free_gb}GB (recomendado ${threshold}GB+)"
-        [[ "$CI" != "true" ]] && err "Espaço insuficiente. Libere espaço em /tmp e tente novamente."
+        [[ "$CI" != "true" ]] && err "Espaço insuficiente. Libere espaço em /tmp."
     fi
     ok "Espaço disponível: ${free_gb}GB"
     ok "Pre-flight OK"
@@ -151,29 +173,36 @@ preflight() {
 # 1. CHAVES GPG (BlackArch + Arch)
 # ════════════════════════════════════════════════
 setup_keys() {
-    sec "CONFIGURANDO CHAVES GPG"
+    sec "CONFIGURANDO CHAVES GPG (target=$TARGET)"
 
-    # Em CI o workflow já inicializou o keyring com haveged.
-    # Fora do CI, inicializa aqui mesmo.
     if [[ "$CI" != "true" ]]; then
         log "Inicializando pacman-key..."
         pacman-key --init
-        pacman-key --populate archlinux
+        if [[ "$TARGET" == "x86_64" ]]; then
+            pacman-key --populate archlinux
+        else
+            pacman-key --populate archlinuxarm 2>/dev/null || \
+                pacman-key --populate archlinux
+        fi
     else
         log "CI detectado — keyring já inicializado pelo workflow. Pulando init."
     fi
 
-    # Verificar se BlackArch já está configurado no pacman.conf do host
-    if grep -q "\[blackarch\]" /etc/pacman.conf 2>/dev/null; then
-        ok "Repositório BlackArch já presente no host"
+    # BlackArch apenas para x86_64 (não tem repositório ARM oficial)
+    if [[ "$TARGET" == "x86_64" ]]; then
+        if grep -q "\[blackarch\]" /etc/pacman.conf 2>/dev/null; then
+            ok "Repositório BlackArch já presente no host"
+        else
+            log "Adicionando repositório BlackArch ao host..."
+            curl -fsSL https://blackarch.org/strap.sh -o /tmp/blackarch-strap.sh
+            chmod +x /tmp/blackarch-strap.sh
+            bash /tmp/blackarch-strap.sh
+            rm -f /tmp/blackarch-strap.sh
+            pacman -Sy --noconfirm
+            ok "BlackArch adicionado"
+        fi
     else
-        log "Adicionando repositório BlackArch ao host..."
-        curl -fsSL https://blackarch.org/strap.sh -o /tmp/blackarch-strap.sh
-        chmod +x /tmp/blackarch-strap.sh
-        bash /tmp/blackarch-strap.sh
-        rm -f /tmp/blackarch-strap.sh
-        pacman -Sy --noconfirm
-        ok "BlackArch adicionado"
+        log "Target $TARGET: BlackArch não tem repositório ARM — pulando"
     fi
 
     ok "Chaves GPG configuradas"
@@ -183,7 +212,7 @@ setup_keys() {
 # 2. INICIALIZAR PERFIL ARCHISO
 # ════════════════════════════════════════════════
 init_profile() {
-    sec "INICIALIZANDO PERFIL ARCHISO"
+    sec "INICIALIZANDO PERFIL ARCHISO (target=$TARGET)"
 
     [[ -d "$PROFILE_DIR" ]] && {
         log "Removendo perfil anterior..."
@@ -194,39 +223,87 @@ init_profile() {
     cp -r /usr/share/archiso/configs/releng "$PROFILE_DIR"
     ok "Perfil base copiado"
 
-    # Substituir pacman.conf
-    cp "$SCRIPT_DIR/archiso/pacman.conf" "$PROFILE_DIR/pacman.conf"
-    ok "pacman.conf configurado (Arch + BlackArch)"
+    # ── pacman.conf por target ──────────────────────────────────────────────
+    if [[ "$TARGET" == "x86_64" ]]; then
+        cp "$SCRIPT_DIR/archiso/pacman.conf" "$PROFILE_DIR/pacman.conf"
+    else
+        local pconf="$SCRIPT_DIR/archiso/pacman-aarch64.conf"
+        [[ ! -f "$pconf" ]] && pconf="$SCRIPT_DIR/archiso/pacman.conf"
+        cp "$pconf" "$PROFILE_DIR/pacman.conf"
+    fi
+    ok "pacman.conf configurado"
 
-    # ── Gerar profiledef.sh adaptado ao ambiente ─────────────────────────
-    # Local: erofs (leitura aleatória ~3× mais rápida, boot mais ágil)
-    # CI:    squashfs+zstd nível 3 (consome menos espaço em disco no runner)
-    if [[ "$CI" == "true" ]] || ! command -v mkfs.erofs &>/dev/null; then
-        [[ "$CI" == "true" ]] && log "CI detectado — usando squashfs (economiza espaço no runner)"
-        ! command -v mkfs.erofs &>/dev/null && warn "mkfs.erofs não encontrado — usando squashfs como fallback"
-        cat > "$PROFILE_DIR/profiledef.sh" <<'PROFILEDEF'
+    # ── profiledef.sh por target ───────────────────────────────────────────
+    case "$TARGET" in
+        rpi)
+            if [[ -f "$SCRIPT_DIR/archiso/profiledef-rpi.sh" ]]; then
+                cp "$SCRIPT_DIR/archiso/profiledef-rpi.sh" "$PROFILE_DIR/profiledef.sh"
+            else
+                _gen_profiledef "v0rtex-os-rpi" "V0RTEX_RPI" "aarch64" "uefi.grub"
+            fi
+            ;;
+        aarch64|mobile)
+            local iso_lbl="V0RTEX_ARM64"
+            [[ "$TARGET" == "mobile" ]] && iso_lbl="V0RTEX_MOBILE"
+            local iso_nm="v0rtex-os-${TARGET}"
+            if [[ "$TARGET" == "aarch64" ]] && [[ -f "$SCRIPT_DIR/archiso/profiledef-arm64.sh" ]]; then
+                cp "$SCRIPT_DIR/archiso/profiledef-arm64.sh" "$PROFILE_DIR/profiledef.sh"
+            else
+                _gen_profiledef "$iso_nm" "$iso_lbl" "aarch64" "uefi.grub"
+            fi
+            ;;
+        x86_64)
+            if [[ "$CI" == "true" ]] || ! command -v mkfs.erofs &>/dev/null; then
+                [[ "$CI" == "true" ]] && log "CI detectado — usando squashfs"
+                ! command -v mkfs.erofs &>/dev/null && warn "mkfs.erofs não encontrado — usando squashfs"
+                _gen_profiledef "v0rtex-os" "V0RTEX_OS" "x86_64" "bios.syslinux' 'uefi.grub"
+            else
+                log "Build local — usando erofs"
+                cp "$SCRIPT_DIR/archiso/profiledef.sh" "$PROFILE_DIR/profiledef.sh"
+            fi
+            ;;
+    esac
+    chmod +x "$PROFILE_DIR/profiledef.sh"
+    ok "profiledef.sh configurado para $TARGET"
+
+    # ── Pacotes por target ─────────────────────────────────────────────────
+    if [[ "$TARGET" == "x86_64" ]]; then
+        cp "$SCRIPT_DIR/archiso/packages.x86_64" "$PROFILE_DIR/packages.x86_64"
+    else
+        local pkg_src="$SCRIPT_DIR/archiso/packages.aarch64"
+        [[ ! -f "$pkg_src" ]] && pkg_src="$SCRIPT_DIR/archiso/packages.x86_64"
+        cp "$pkg_src" "$PROFILE_DIR/packages.x86_64"
+    fi
+    local pkg_count
+    pkg_count=$(grep -cE "^[^#[:space:]]" "$PROFILE_DIR/packages.x86_64")
+    ok "Lista de pacotes: $pkg_count pacotes"
+
+    # Syslinux apenas para x86_64 (BIOS boot)
+    if [[ "$TARGET" == "x86_64" ]]; then
+        mkdir -p "$PROFILE_DIR/syslinux"
+        cp -rT "$SCRIPT_DIR/archiso/syslinux/" "$PROFILE_DIR/syslinux/" 2>/dev/null || true
+        ok "Syslinux configurado (archisolabel=V0RTEX_OS)"
+    fi
+}
+
+# Helper: gerar profiledef.sh genérico
+_gen_profiledef() {
+    local iso_name="$1" iso_label="$2" arch="$3" bootmodes="$4"
+    local img_type="squashfs"
+    cat > "$PROFILE_DIR/profiledef.sh" <<PROFILEDEF
 #!/usr/bin/env bash
-# V0rtexOS — ArchISO Profile (CI / squashfs)
-iso_name="v0rtex-os"
-iso_label="V0RTEX_OS"
+iso_name="${iso_name}"
+iso_label="${iso_label}"
 iso_publisher="V0rtex Security"
-iso_application="V0rtexOS — Grey Hat Linux Hardened"
-iso_version="$(date +%Y.%m.%d)"
+iso_application="V0rtexOS — Grey Hat Linux — ${iso_label}"
+iso_version="\$(date +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')
-bootmodes=(
-    'bios.syslinux'
-    'uefi.grub'
-)
-arch="x86_64"
+bootmodes=('${bootmodes}')
+arch="${arch}"
 pacman_conf="pacman.conf"
-airootfs_image_type="squashfs"
-airootfs_image_tool_options=(
-    '-comp' 'zstd'
-    '-Xcompression-level' '3'
-    '-b' '256K'
-    '-no-duplicates'
-)
+airootfs_image_type="${img_type}"
+airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '3' '-b' '256K' '-no-duplicates')
 bootstrap_tarball_compression=('zstd' '-c' '-T0' '--auto-threads=logical' '--long' '-19')
 file_permissions=(
     ["/etc/shadow"]="0:0:400"
@@ -235,7 +312,6 @@ file_permissions=(
     ["/usr/local/bin/aet-scan"]="0:0:755"
     ["/usr/local/bin/aet-nuke"]="0:0:755"
     ["/usr/local/bin/amnesia"]="0:0:755"
-    ["/usr/local/bin/install-tools.sh"]="0:0:755"
     ["/usr/local/bin/vortex-center"]="0:0:755"
     ["/usr/local/bin/aeternus-splash"]="0:0:755"
     ["/usr/local/bin/aeternus-panel"]="0:0:755"
@@ -249,23 +325,6 @@ file_permissions=(
     ["/usr/local/bin/v0rtex-autoresize.sh"]="0:0:755"
 )
 PROFILEDEF
-    else
-        log "Build local — usando erofs (boot mais rápido, I/O otimizado)"
-        cp "$SCRIPT_DIR/archiso/profiledef.sh" "$PROFILE_DIR/profiledef.sh"
-    fi
-    chmod +x "$PROFILE_DIR/profiledef.sh"
-    ok "profiledef.sh configurado"
-
-    # Lista de pacotes
-    cp "$SCRIPT_DIR/archiso/packages.x86_64" "$PROFILE_DIR/packages.x86_64"
-    local pkg_count
-    pkg_count=$(grep -cE "^[^#[:space:]]" "$PROFILE_DIR/packages.x86_64")
-    ok "Lista de pacotes: $pkg_count pacotes"
-
-    # Syslinux (boot BIOS) — sobrescreve o releng padrão com o nosso label
-    mkdir -p "$PROFILE_DIR/syslinux"
-    cp -rT "$SCRIPT_DIR/archiso/syslinux/" "$PROFILE_DIR/syslinux/"
-    ok "Syslinux configurado (archisolabel=V0RTEX_OS)"
 }
 
 # ════════════════════════════════════════════════
@@ -440,8 +499,21 @@ GUISCRIPT
         "$air/etc/systemd/system/amnesia-shutdown.service"
 
     install -Dm644 "$SCRIPT_DIR/archiso/airootfs/etc/systemd/system/mount-squashfs.service" \
-        "$air/etc/systemd/system/mount-squashfs.service"
+        "$air/etc/systemd/system/mount-squashfs.service" 2>/dev/null || true
     ok "Serviço mount-squashfs instalado"
+
+    # ── FIX: Autologin root@tty1 ──────────────────────────────────────────
+    # Garante que root faz login automaticamente no tty1.
+    # .bash_profile executa zsh, .zprofile chama v0rtex-startx, que inicia X.
+    # Sem autologin, a GUI nunca inicia no live boot.
+    mkdir -p "$air/etc/systemd/system/getty@tty1.service.d"
+    cat > "$air/etc/systemd/system/getty@tty1.service.d/autologin.conf" <<'AUTOLOGIN'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+Type=idle
+AUTOLOGIN
+    ok "Autologin root@tty1 configurado (FIX)"
 
     # Habilitar serviços no multi-user.target e sysinit.target
     mkdir -p \
@@ -452,13 +524,22 @@ GUISCRIPT
     ln -sf "/etc/systemd/system/mount-squashfs.service" \
         "$air/etc/systemd/system/sysinit.target.wants/mount-squashfs.service" 2>/dev/null || true
 
+    # FIX: aeternus-panel e aeternus-taskbar são iniciados EXCLUSIVAMENTE
+    # pelo .xinitrc — NÃO os adicionar ao systemd para evitar que tentem
+    # conectar ao DISPLAY antes do Xorg estar ativo (causava múltiplos shells).
     for svc in ghost-protocol aet-nuke NetworkManager tor apparmor; do
         ln -sf "/etc/systemd/system/${svc}.service" \
             "$air/etc/systemd/system/multi-user.target.wants/${svc}.service" 2>/dev/null || true
     done
     ln -sf "/etc/systemd/system/amnesia-shutdown.service" \
         "$air/etc/systemd/system/halt.target.wants/amnesia-shutdown.service" 2>/dev/null || true
-    ok "Serviços habilitados"
+
+    # Garantir que panel/taskbar NÃO estejam habilitados em nenhum target
+    rm -f "$air/etc/systemd/system/graphical.target.wants/aeternus-panel.service" 2>/dev/null || true
+    rm -f "$air/etc/systemd/system/graphical.target.wants/aeternus-taskbar.service" 2>/dev/null || true
+    rm -f "$air/etc/systemd/system/multi-user.target.wants/aeternus-panel.service" 2>/dev/null || true
+    rm -f "$air/etc/systemd/system/multi-user.target.wants/aeternus-taskbar.service" 2>/dev/null || true
+    ok "Serviços habilitados (panel/taskbar apenas via .xinitrc)"
 
     # ── Mascarar serviços lentos desnecessários (live ISO) ────
     log "Mascarando serviços desnecessários para boot rápido..."
@@ -610,13 +691,15 @@ MOTD
 # 4. CUSTOMIZAR BOOTLOADER
 # ════════════════════════════════════════════════
 configure_boot() {
-    sec "CONFIGURANDO BOOTLOADER"
+    sec "CONFIGURANDO BOOTLOADER (target=$TARGET)"
 
     local air="$PROFILE_DIR/airootfs"
-
     mkdir -p "$PROFILE_DIR/grub"
     mkdir -p "$air/boot/grub"
-    cat > "$PROFILE_DIR/grub/grub.cfg" <<'GRUBCFG'
+
+    case "$TARGET" in
+        x86_64)
+            cat > "$PROFILE_DIR/grub/grub.cfg" <<'GRUBCFG'
 set default=0
 set timeout=1
 set timeout_style=countdown
@@ -632,31 +715,69 @@ insmod ext2
 
 menuentry "V0rtexOS" --class v0rtex --class gnu-linux --class gnu --class os {
     linux /arch/boot/x86_64/vmlinuz-linux-hardened \
-        archisobasedir=arch \
-        archisolabel=V0RTEX_OS \
-        cow_spacesize=4G \
+        archisobasedir=arch archisolabel=V0RTEX_OS cow_spacesize=4G \
         quiet loglevel=0 rd.udev.log_level=3 \
-        rd.systemd.show_status=false \
-        systemd.show_status=0 \
-        vt.handoff=7 \
-        apparmor=1 security=apparmor \
-        page_poison=1 slab_nomerge \
-        pti=on vsyscall=none \
+        rd.systemd.show_status=false systemd.show_status=0 \
+        vt.handoff=7 apparmor=1 security=apparmor \
+        page_poison=1 slab_nomerge pti=on vsyscall=none \
         spectre_v2=on spec_store_bypass_disable=on \
-        mitigations=auto,nosmt \
-        nowatchdog \
-        console=tty0
+        mitigations=auto,nosmt nowatchdog console=tty0
     initrd /arch/boot/x86_64/initramfs-linux-hardened.img
 }
-
-menuentry "Reboot" {
-    reboot
-}
-menuentry "Power Off" {
-    halt
-}
+menuentry "Reboot"    { reboot }
+menuentry "Power Off" { halt }
 GRUBCFG
-    ok "GRUB configurado"
+            ;;
+
+        rpi)
+            # RPi: kernel ARM64 sem hardened (não disponível no Arch ARM)
+            cat > "$PROFILE_DIR/grub/grub.cfg" <<'GRUBCFG'
+set default=0
+set timeout=1
+insmod all_video
+insmod gzio
+insmod part_gpt
+
+menuentry "V0rtexOS (Raspberry Pi)" {
+    linux /arch/boot/aarch64/vmlinuz-linux \
+        archisobasedir=arch archisolabel=V0RTEX_RPI cow_spacesize=2G \
+        quiet loglevel=0 apparmor=1 security=apparmor console=tty0
+    initrd /arch/boot/aarch64/initramfs-linux.img
+}
+menuentry "Reboot"    { reboot }
+menuentry "Power Off" { halt }
+GRUBCFG
+            # RPi: copiar config.txt e cmdline.txt
+            if [[ -f "$SCRIPT_DIR/archiso/airootfs/boot/config.txt" ]]; then
+                cp "$SCRIPT_DIR/archiso/airootfs/boot/config.txt"  "$air/boot/config.txt"
+                cp "$SCRIPT_DIR/archiso/airootfs/boot/cmdline.txt" "$air/boot/cmdline.txt"
+                ok "RPi config.txt e cmdline.txt copiados"
+            fi
+            ;;
+
+        aarch64|mobile)
+            local iso_label="V0RTEX_ARM64"
+            [[ "$TARGET" == "mobile" ]] && iso_label="V0RTEX_MOBILE"
+            cat > "$PROFILE_DIR/grub/grub.cfg" <<GRUBCFG
+set default=0
+set timeout=1
+insmod all_video
+insmod gzio
+insmod part_gpt
+
+menuentry "V0rtexOS (ARM64)" {
+    linux /arch/boot/aarch64/vmlinuz-linux \\
+        archisobasedir=arch archisolabel=${iso_label} cow_spacesize=2G \\
+        quiet loglevel=0 apparmor=1 security=apparmor console=tty0
+    initrd /arch/boot/aarch64/initramfs-linux.img
+}
+menuentry "Reboot"    { reboot }
+menuentry "Power Off" { halt }
+GRUBCFG
+            ;;
+    esac
+
+    ok "GRUB configurado para $TARGET"
 }
 
 # ════════════════════════════════════════════════
@@ -698,7 +819,7 @@ post_build() {
     sec "PÓS-BUILD"
 
     local iso
-    iso=$(find "$OUT_DIR" -name "v0rtex-os-*.iso" | sort | tail -1)
+    iso=$(find "$OUT_DIR" -name "v0rtex-os*.iso" | sort | tail -1)
     [[ -z "$iso" ]] && err "ISO não encontrada em $OUT_DIR"
 
     local size
@@ -754,7 +875,7 @@ main() {
   \ V /| o| v /  | |   | |_  >  <  | |_| \__ \
    \_/ |___|_|_\ |_|  |____/_/\_\  \___/ |___/
 HEADER
-    echo -e "${RST}${GRY}  Grey Hat Linux — Build System v2.0${RST}"
+    echo -e "${RST}${GRY}  Grey Hat Linux — Build System v2.1 | target: ${TARGET}${RST}"
     echo -e "${DIM}  Log: $LOG_FILE${RST}"
     echo
 

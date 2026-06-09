@@ -1,15 +1,15 @@
+# aeternus-panel.service — DESABILITADO COMO SERVIÇO SYSTEMD
+# O panel e taskbar são iniciados exclusivamente pelo .xinitrc
+# Isso evita que tentem conectar ao DISPLAY antes do Xorg estar ativo,
+# o que causava múltiplos shells e falhas de inicialização.
+#
+# Este arquivo existe apenas como referência.
+# NÃO habilitar com: systemctl enable aeternus-panel
+#
+# Para iniciar manualmente após X estar ativo:
+#   DISPLAY=:0 aeternus-panel &
+
 [Unit]
-Description=Aeternus OS Desktop Panel (X11/Cairo)
+Description=V0rtexOS Desktop Panel (NÃO habilitar — iniciado via .xinitrc)
 Documentation=file:///usr/local/src/aeternus-gui/panel/aeternus-panel.c
-After=graphical.target
-
-[Service]
-Type=simple
-Environment=DISPLAY=:0
-ExecStartPre=/bin/sleep 2
-ExecStart=/usr/local/bin/aeternus-panel
-Restart=on-failure
-RestartSec=3s
-
-[Install]
-WantedBy=graphical.target
+# Nenhum [Install] section = não pode ser habilitado acidentalmente

@@ -1,0 +1,87 @@
+name: Build V0rtexOS Mobile (ARM64 Minimal)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'aeternus-os/**'
+      - '.github/workflows/build-iso-mobile.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-iso-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space on runner
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Mobile rootfs (Arch Linux ARM container)
+        run: |
+          docker run --privileged --rm \
+            --platform linux/arm64 \
+            -v "${{ github.workspace }}:/workspace" \
+            -v /mnt:/mnt \
+            -w /workspace/aeternus-os \
+            -e CI=true \
+            -e GITHUB_ACTIONS=true \
+            -e TARGET=mobile \
+            archlinuxarm/base:latest \
+            bash -euxo pipefail -c '
+              echo "Server = https://mirror.archlinuxarm.org/\$arch/\$repo" > /etc/pacman.d/mirrorlist
+
+              pacman -Syu --noconfirm --needed \
+                archiso git curl base-devel gcc make cmake \
+                cairo libxrender libx11 pkg-config \
+                squashfs-tools libisoburn dosfstools mtools \
+                grub efibootmgr python openssl haveged
+
+              haveged -w 1024 &
+              pacman-key --init
+              pacman-key --populate archlinuxarm
+
+              bash build.sh --target=mobile
+            '
+
+      - name: List release artifacts
+        run: ls -lah aeternus-os/release/ 2>/dev/null || true
+
+      - name: Upload Mobile rootfs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v0rtexos-mobile-${{ github.run_number }}
+          path: |
+            aeternus-os/release/*mobile*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## V0rtexOS Mobile Build" >> $GITHUB_STEP_SUMMARY
+          echo "Rootfs ARM64 para celulares (Termux/chroot, PostmarketOS, Android)" >> $GITHUB_STEP_SUMMARY
+          ls -lh aeternus-os/release/ 2>/dev/null >> $GITHUB_STEP_SUMMARY || true

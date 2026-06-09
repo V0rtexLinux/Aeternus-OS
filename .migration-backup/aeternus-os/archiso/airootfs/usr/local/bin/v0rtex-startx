@@ -1,32 +1,97 @@
 #!/bin/bash
-# V0rtexOS — inicia Xorg após display/DRM estar pronto (evita falha no boot)
+# V0rtexOS — inicia Xorg de forma robusta
+# Chamado por .zprofile / .bash_profile apenas no tty1
+# NÃO usa set -euo pipefail: cada passo falha graciosamente
 
-set -euo pipefail
+XLOG=/tmp/xorg.log
+SLOG=/tmp/v0rtex-startx.log
 
-export XAUTHORITY="${HOME}/.Xauthority"
-touch "$XAUTHORITY"
-chmod 600 "$XAUTHORITY"
+exec >> "$SLOG" 2>&1
+echo "[v0rtex-startx] $(date) — iniciando (TTY=$(tty), DISPLAY=${DISPLAY:-unset})"
 
+# Já existe uma sessão X? Não iniciar outra.
+if [ -n "${DISPLAY:-}" ]; then
+    echo "[v0rtex-startx] DISPLAY já definido ($DISPLAY), abortando para evitar sessão duplicada."
+    exit 0
+fi
+
+# Verificar se outro Xorg já está rodando no :0
+if [ -e /tmp/.X0-lock ]; then
+    echo "[v0rtex-startx] /tmp/.X0-lock encontrado. Aguardando X existente ou limpando lock stale..."
+    # Checar se o PID no lock ainda existe
+    XPID=$(cat /tmp/.X0-lock 2>/dev/null | tr -d ' ' || echo "")
+    if [ -n "$XPID" ] && kill -0 "$XPID" 2>/dev/null; then
+        echo "[v0rtex-startx] X server (PID $XPID) ainda ativo. Saindo."
+        export DISPLAY=:0
+        exit 0
+    fi
+    echo "[v0rtex-startx] Lock stale detectado (PID $XPID morto). Limpando..."
+    rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
+fi
+
+# Garantir XAUTHORITY
+export XAUTHORITY="${HOME:-/root}/.Xauthority"
+touch "$XAUTHORITY" 2>/dev/null || true
+chmod 600 "$XAUTHORITY" 2>/dev/null || true
+
+# Garantir XDG_RUNTIME_DIR
 export XDG_RUNTIME_DIR="/tmp/runtime-$(id -u)"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-# Plymouth pode ainda segurar o DRM no autologin rápido
+# Aguardar Plymouth liberar o DRM (máx 10s para não travar o boot)
 if command -v plymouth >/dev/null 2>&1; then
-    for _ in $(seq 1 40); do
+    echo "[v0rtex-startx] Aguardando Plymouth liberar DRM..."
+    for i in $(seq 1 40); do
         plymouth --ping >/dev/null 2>&1 || break
         sleep 0.25
     done
+    # Forçar saída do Plymouth se ainda estiver ativo
+    plymouth quit 2>/dev/null || true
+    sleep 0.3
 fi
 
-udevadm settle -t 15 2>/dev/null || udevadm settle 2>/dev/null || true
-
-# Aguarda card DRM (QEMU virtio, bochs, bare metal)
-for _ in $(seq 1 30); do
-    [[ -e /dev/dri/card0 ]] && break
-    sleep 0.5
+# Aguardar dispositivo DRM estar disponível (QEMU virtio, bare metal, ARM)
+echo "[v0rtex-startx] Aguardando /dev/dri/card0..."
+DRM_READY=0
+for i in $(seq 1 40); do
+    if [ -e /dev/dri/card0 ] || [ -e /dev/dri/renderD128 ]; then
+        DRM_READY=1
+        break
+    fi
+    sleep 0.25
 done
 
-echo "[v0rtex] Iniciando Xorg... (log: /tmp/xorg.log)"
-exec startx "$HOME/.xinitrc" -- :0 \
-    -logfile /tmp/xorg.log -logverbose 3
+if [ "$DRM_READY" -eq 0 ]; then
+    echo "[v0rtex-startx] AVISO: /dev/dri/card0 não encontrado — tentando iniciar X mesmo assim (fbdev fallback)"
+fi
+
+# Aguardar udev processar dispositivos
+udevadm settle -t 8 2>/dev/null || udevadm settle 2>/dev/null || true
+
+echo "[v0rtex-startx] Iniciando startx... (log: $XLOG)"
+
+# startx executa .xinitrc; ao terminar (i3 encerrar), retorna aqui
+startx "${HOME:-/root}/.xinitrc" -- :0 \
+    -logfile "$XLOG" \
+    -logverbose 3 \
+    -nolisten tcp \
+    2>>"$SLOG"
+
+EXIT_CODE=$?
+echo "[v0rtex-startx] startx encerrou com código $EXIT_CODE"
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║  V0rtexOS — Erro ao iniciar interface gráfica   ║"
+    echo "╠══════════════════════════════════════════════════╣"
+    echo "║  Diagnóstico:                                    ║"
+    echo "║    cat /tmp/xorg.log                             ║"
+    echo "║    cat /tmp/v0rtex-startx.log                    ║"
+    echo "║    cat /tmp/v0rtex-session.log                   ║"
+    echo "╚══════════════════════════════════════════════════╝"
+    echo ""
+fi
+
+exit $EXIT_CODE
