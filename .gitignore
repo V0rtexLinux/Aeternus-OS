@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# GitHub Actions — instruções locais do editor (workflows ficam versionados)
+.github/instructions/
